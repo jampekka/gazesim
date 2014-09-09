@@ -42,9 +42,9 @@ class SplitHypothesis(object):
 	def total_lik(self):
 		return self.history_lik + self.segment_lik
 
-def iocs(ts, gaze, rate=1.0/0.250, noise_std=1.0):
+def iocs(ts, gaze, split_rate=1.0/0.250, noise_std=1.0):
 	seg_normer = np.log(1.0/(noise_std**2*np.pi*2))
-	
+
 	root_hypothesis = SplitHypothesis()
 	root_hypothesis.splits = []
 	root_hypothesis.history_lik = 0.0
@@ -54,12 +54,12 @@ def iocs(ts, gaze, rate=1.0/0.250, noise_std=1.0):
 	root_hypothesis.my = gaze[0][1]
 	root_hypothesis.ssx = 0.0
 	root_hypothesis.ssy = 0.0
-
+	
 	lik_comparator = lambda hypo: -hypo.total_lik 
 	# TODO: Verify this! There's something wrong
 	# either here or in the regression likelihood.
 	# The split likelihood seems to be too large.
-	split_lik = lambda dt: 2*np.log(1 - np.exp(-rate*dt))
+	split_lik = lambda dt: 2*np.log(1 - np.exp(-split_rate*dt))
 	#split_lik = lambda dt: -20.0 # Works quite nicely with this. :'(
 	
 	prev_t = ts[0]
@@ -88,12 +88,12 @@ def iocs(ts, gaze, rate=1.0/0.250, noise_std=1.0):
 		# TODO: The loglikelihood can actually be > 0 with very small
 		#	stds!
 		new_total_lik = new.total_lik
-		for i in range(len(hypotheses)):
-			if hypotheses[i].total_lik < new_total_lik:
+		for si in range(len(hypotheses)):
+			if hypotheses[si].total_lik < new_total_lik:
 				break
 		else:
-			i = None
-		hypotheses = hypotheses[:i]
+			si = None
+		hypotheses = hypotheses[:si]
 		
 		for hypothesis in hypotheses:
 			hypothesis.n += 1
@@ -111,9 +111,10 @@ def iocs(ts, gaze, rate=1.0/0.250, noise_std=1.0):
 			# or there's some kind of horrible bug somewhere.
 			# Or the logic behind the parameters doesn't work.
 			hypothesis.segment_lik = (hypothesis.n*seg_normer - (hypothesis.ssx+hypothesis.ssy)/(2*noise_std**2))
-		
+
 		hypotheses.append(new)
 		hypotheses.sort(key=lik_comparator)
+		#print "%s,%s"%(i, hypotheses[0].total_lik)
 		
 		
 	return hypotheses[0].splits
