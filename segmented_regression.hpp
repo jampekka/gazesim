@@ -8,6 +8,66 @@
 namespace ar = arma;
 typedef unsigned int uint;
 
+template <typename T>
+struct SharedList {
+	struct SharedNode {
+		SharedNode *parent = NULL;
+		uint refcount;
+		T value;
+
+		SharedNode(SharedNode *parent, T value)
+			:parent(parent), refcount(1), value(value)
+		{
+			if(parent) {
+				parent->refcount += 1;
+			}
+		}
+
+		~SharedNode() {
+			if(parent) {
+				parent->refcount -= 1;
+			}
+		}
+	};
+
+	SharedNode *tail;
+	
+	SharedList() {
+		tail = NULL;
+	}
+
+	SharedList(const SharedList &parent, T value)
+	{
+		tail = new SharedNode(parent.tail, value);
+	}
+	
+	SharedList(const SharedList& that) {
+		tail = that.tail;
+		if(tail) {
+			tail->refcount += 1;
+		}
+	}
+
+	~SharedList() {
+		if(!tail) return;
+		tail->refcount -= 1;
+		
+		// We could in theory do this cascade in the
+		// destructor of the SharedNode. However, in practice
+		// even on realistic data that leads to a huge recursion that
+		// leads to a stack overflow. And this is probably a lot faster
+		// anyway.
+		auto node = tail;
+		while(node and node->refcount == 0) {
+			if(node->refcount == 0) {
+				auto killme = node;
+				node = node->parent;
+				delete killme;
+			}
+		}
+	}
+};
+
 template <class Vector, class Model>
 struct IocsHypothesis {
 	// TODO: We can save a lot of memory and allocations by doing
@@ -21,16 +81,16 @@ struct IocsHypothesis {
 	// Actually it should be a reference, but STL really really doesn't
 	// like that. This is one horrible language.
 	const Model *model = NULL;
-	std::vector<uint> splits;
+	SharedList<uint> splits;
 	double history_lik = 0.0;
 	double segment_lik = 0.0;
 
 	
-
-	IocsHypothesis(Model* model, IocsHypothesis& parent)
-		:model(model), splits(parent.splits)
+	IocsHypothesis(Model* model, IocsHypothesis& parent, double dt, uint i)
+		:model(model), splits(parent.splits, i)
 	{
 		history_lik = parent.likelihood();
+		history_lik += model->split_likelihood(dt);
 	}
 
 	IocsHypothesis(Model* model)
@@ -38,18 +98,11 @@ struct IocsHypothesis {
 	{}
 
 	void measurement(uint i, double dt, Vector position) {
-		if(n == 0 and i != 0) {
-			splits.push_back(i);
-			history_lik += model->split_likelihood(dt);
-		}
-
-		if(n == 0) {
-			mean = position;
-		}
-
 		n++;
+		// We need an explicit eval here, otherwise armadillo
+		// calculates a wrong value.
 		auto delta = (position - mean).eval();
-		mean += (delta/n).eval();
+		mean += (delta/n);
 
 		// Percent sign is a element wise multiplication.
 		// I'd like NumPy-style array and matrix separation better.
@@ -57,7 +110,10 @@ struct IocsHypothesis {
 		// so there must be some performance penalties involved.
 		ss += delta % (position-mean);
 		segment_lik = n*model->seg_normer -
-			0.5*ar::sum(ss/ar::square(model->noise_std));
+			0.5*
+			ar::sum(
+				ss%model->noise_prec
+				);
 
 	}
 
@@ -72,6 +128,7 @@ struct Iocs {
 	using Vector = ar::vec::fixed<ndim>;
 	using Hypothesis = IocsHypothesis<Vector, Iocs>;
 	Vector noise_std;
+	Vector noise_prec;
 	double split_rate;
 	std::vector<Hypothesis> hypotheses;
 
@@ -83,45 +140,48 @@ struct Iocs {
 		:noise_std(noise_std), split_rate(split_rate)
 	{
 		seg_normer = log(1.0/(pow(sqrt(2*M_PI), ndim)*ar::prod(noise_std)));
+		noise_prec = 1.0/ar::square(noise_std);
         }
 
 	double split_likelihood(double dt) const {
 		return ndim*log(1.0-exp(-split_rate*dt));
 	}
 
-	void measurement(double dt, Vector measurement) {
+	void measurement(double dt, const Vector& measurement) {
 		if(hypotheses.size() == 0) {
-			Hypothesis root(this);
+			hypotheses.emplace_back(this);
+			auto& root = hypotheses.back();
 			root.measurement(0, dt, measurement);
-			hypotheses.push_back(root);
 			++i;
 			return;
 		}
 		
 		auto& winner = hypotheses[0];
-		Hypothesis new_hypo(this, winner);
-		new_hypo.measurement(i, dt, measurement);
-		auto worst_survivor = new_hypo.likelihood();
+		Hypothesis new_hypo(this, winner, dt, i);
+		auto worst_survivor = new_hypo.history_lik + 1e-6;
 		
 		auto cutoff = std::find_if(hypotheses.begin(), hypotheses.end(),
 			[&worst_survivor](const Hypothesis& hypo) {
-				return hypo.likelihood() < worst_survivor;
+				return hypo.likelihood() <= worst_survivor;
 				}
 			);
 		
-		hypotheses.erase(cutoff, hypotheses.end());
+		if(cutoff != hypotheses.end()) {
+			hypotheses.erase(cutoff, hypotheses.end());
+		}
+
+		hypotheses.push_back(new_hypo);
 
 		for(auto& hypo: hypotheses) {
 			hypo.measurement(i, dt, measurement);
 		}
 		
-		hypotheses.push_back(new_hypo);
 		std::sort(hypotheses.begin(), hypotheses.end(),
 			[](const Hypothesis& a, const Hypothesis& b) {
 				return a.likelihood() > b.likelihood();
 			}
 		);
-		
+
 		//std::cout << i << "," << hypotheses[0].likelihood() << std::endl;
 		
 		++i;
@@ -232,7 +292,9 @@ void iocs2d(double *ts, double *gaze, uint length,
 		prev_t = ts[i];
 	}
 	
-	for(auto split: fitter.hypotheses[0].splits) {
-		saccades[split] = 1;
+	auto split = fitter.hypotheses[0].splits.tail;
+	while(split) {
+		saccades[split->value] = 1;
+		split = split->parent;
 	}
 }

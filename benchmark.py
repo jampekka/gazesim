@@ -54,10 +54,10 @@ def benchmark():
 		iocs_error = mean_distance(iocs_gaze, pos)
 		iocs_errors.append(iocs_error)
 		
-		iocs_slow_saccades = iocs(t, gaze, noise_std=std, split_rate=split_rate)
-		iocs_slow_gaze = reconstruct_fixations(gaze, iocs_saccades)
-		iocs_slow_error = mean_distance(iocs_gaze, pos)
-		iocs_slow_errors.append(iocs_error)
+		iocs_slow_saccades = iocs_slow(t, gaze, noise_std=std, split_rate=split_rate)
+		iocs_slow_gaze = reconstruct_fixations(gaze, iocs_slow_saccades)
+		iocs_slow_error = mean_distance(iocs_slow_gaze, pos)
+		iocs_slow_errors.append(iocs_slow_error)
 		
 		print len(saccades), len(iocs_saccades)
 		ivt_errors.append(ivt_error)
