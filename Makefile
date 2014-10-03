@@ -7,10 +7,10 @@ endif
 
 fast_saccade_detectors.so: fast_saccade_detectors.pyx segmented_regression.hpp
 	cython2 $<
-	g++ $(CFLAGS) -I. -std=c++11 -shared `python2-config --includes` `pkg-config --cflags --libs eigen3` -o fast_saccade_detectors.so fast_saccade_detectors.c
+	g++ $(CFLAGS) -I. -std=c++11 -shared `python2-config --includes` `pkg-config --cflags --libs eigen3` -lboost_system -o fast_saccade_detectors.so fast_saccade_detectors.c
 
 iocs_perf: iocs_perf.cpp segmented_regression.hpp
-	g++ `pkg-config --cflags --libs eigen3` $(CFLAGS) -g -std=c++11 -o $@ -lprofiler -ltcmalloc -Wall $<
+	g++ `pkg-config --cflags --libs eigen3` $(CFLAGS) -std=c++11 -o $@ -Wall $<
 
 .PHONY: perftest
 perftest: iocs_perf

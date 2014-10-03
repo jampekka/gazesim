@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <list>
+#include <forward_list>
 #include <memory>
 #include <cmath>
 #include <algorithm>
@@ -57,7 +58,8 @@ struct SharedList {
 
 	~SharedList() {
 		if(!tail) return;
-		tail->refcount -= 1;
+		#warning "Make sure this doesn't leak!"
+		//tail->refcount -= 1;
 		
 		// We could in theory do this cascade in the
 		// destructor of the SharedNode. However, in practice
@@ -66,11 +68,9 @@ struct SharedList {
 		// anyway.
 		auto node = tail;
 		while(node and node->refcount == 0) {
-			if(node->refcount == 0) {
-				auto killme = node;
-				node = node->parent;
-				delete killme;
-			}
+			auto killme = node;
+			node = node->parent;
+			delete killme;
 		}
 	}
 };
@@ -90,7 +90,8 @@ struct IocsHypothesis {
 	const Model *model = NULL;
 	SharedList<uint> splits;
 	double history_lik = 0.0;
-	double segment_lik = 0.0;
+	//double segment_lik = 0.0;
+	double _total_likelihood = 0.0;
 
 	
 	IocsHypothesis(Model* model, IocsHypothesis& parent, double dt, uint i)
@@ -105,7 +106,7 @@ struct IocsHypothesis {
 	{}
 	
 	
-	void measurement(uint i, double dt, double* position) {
+	inline void measurement(uint i, double dt, double* position) {
 		measurement(i, dt, Map<Vector>(position));
 	}
 	
@@ -117,11 +118,13 @@ struct IocsHypothesis {
 		mean += (delta/n);
 
 		ss += delta.cwiseProduct(position-mean);
-		segment_lik = n*model->seg_normer - 0.5*(ss.cwiseProduct(model->noise_prec)).sum();
+		auto segment_lik = n*model->seg_normer - 0.5*(ss.cwiseProduct(model->noise_prec)).sum();
+		_total_likelihood = history_lik + segment_lik;
 	}
 
 	double likelihood() const {
-		return history_lik + segment_lik;
+		return _total_likelihood;
+		//return history_lik + segment_lik;
 	}
 };
 
@@ -133,8 +136,10 @@ struct Iocs {
 	Vector noise_std;
 	Vector noise_prec;
 	double split_rate;
-	// This could maybe be a list
-	std::vector<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
+	//std::vector<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
+	// At least the boost pool allocators are quite slow, although
+	// almost half of the performance seems to go to malloc
+	std::forward_list<Hypothesis> hypotheses;
 
 	double seg_normer;
 
@@ -157,44 +162,40 @@ struct Iocs {
 		measurement(dt, pos);
 	}
 
+	Hypothesis& get_winner() {
+		static const auto likcmp = [](const Hypothesis& a, const Hypothesis& b) {
+			return a.likelihood() <= b.likelihood();
+		};
+
+		return *std::max_element(hypotheses.begin(), hypotheses.end(), likcmp);
+	}
+
 	void measurement(double dt, Ref<Vector> measurement) {
-		if(hypotheses.size() == 0) {
-			hypotheses.emplace_back(this);
-			auto& root = hypotheses.back();
+		if(hypotheses.empty()) {
+			hypotheses.emplace_front(this);
+			auto& root = hypotheses.front();
 			root.measurement(0, dt, measurement);
 			++i;
 			return;
 		}
 		
-		auto& winner = hypotheses.front();
-		Hypothesis new_hypo(this, winner, dt, i);
+
+		auto& winner = get_winner();
+		hypotheses.emplace_front(this, winner, dt, i);
+		auto& new_hypo = hypotheses.front();
 		auto worst_survivor = new_hypo.history_lik;
 		
-		auto cutoff = std::find_if(hypotheses.begin(), hypotheses.end(),
-			[&worst_survivor](const Hypothesis& hypo) {
-				return hypo.likelihood() <= worst_survivor;
-				}
-			);
+		static const auto no_chance = [&worst_survivor](const Hypothesis& hypo) {
+			return hypo.likelihood() < worst_survivor;
+		};
 		
-		if(cutoff != hypotheses.end()) {
-			hypotheses.erase(cutoff, hypotheses.end());
-		}
-
-		hypotheses.push_back(new_hypo);
+		hypotheses.remove_if(no_chance);
+		//hypotheses.push_front(new_hypo);
 
 		for(auto& hypo: hypotheses) {
 			hypo.measurement(i, dt, measurement);
 		}
-		
-		// This could maybe be a heap
-		std::sort(hypotheses.begin(), hypotheses.end(),
-			[](const Hypothesis& a, const Hypothesis& b) {
-				return a.likelihood() > b.likelihood();
-			}
-		);
 
-		//std::cout << i << "," << hypotheses[0].likelihood() << std::endl;
-		
 		++i;
 	}
 };
@@ -215,7 +216,7 @@ void iocs2d(double *ts, double *gaze, uint length,
 		prev_t = ts[i];
 	}
 	
-	auto split = fitter.hypotheses.front().splits.tail;
+	auto split = fitter.get_winner().splits.tail;
 	while(split) {
 		saccades[split->value] = 1;
 		split = split->parent;

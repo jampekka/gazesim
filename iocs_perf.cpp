@@ -39,5 +39,5 @@ int main(int argc, char **argv) {
 	}
 
 	std::cerr << n/(double(clock()-start_time)/CLOCKS_PER_SEC) << " samples per second" << std::endl;
-	std::cerr << fitter.hypotheses.size() << " hypotheses alive" << std::endl;
+	//std::cerr << fitter.hypotheses.size() << " hypotheses alive" << std::endl;
 }
