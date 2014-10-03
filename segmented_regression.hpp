@@ -1,12 +1,19 @@
+// TODO! This doesn't agree with the Python-implementation
+//	results since porting to Eigen!
+
 #include <vector>
+#include <list>
 #include <memory>
 #include <cmath>
-#include <armadillo>
 #include <algorithm>
 #include <iostream>
+#include <Eigen/Dense>
+#include <Eigen/StdVector>
 
-namespace ar = arma;
 typedef unsigned int uint;
+using Eigen::Vector2d;
+using Eigen::Map;
+using Eigen::Ref;
 
 template <typename T>
 struct SharedList {
@@ -92,33 +99,25 @@ struct IocsHypothesis {
 		history_lik = parent.likelihood();
 		history_lik += model->split_likelihood(dt);
 	}
-
+	
 	IocsHypothesis(Model* model)
 		:model(model)
 	{}
-
+	
+	
 	void measurement(uint i, double dt, double* position) {
-		measurement(i, dt, Vector(position));
+		measurement(i, dt, Map<Vector>(position));
 	}
-
-	void measurement(uint i, double dt, Vector position) {
+	
+	void measurement(uint i, double dt, Ref<Vector> position) {
 		n++;
-		// We need an explicit eval here, otherwise armadillo
-		// calculates a wrong value.
+		// ARGH! Eigen (as well as Armadillo) does wrong math
+		// if we don't eagerly eval!!
 		auto delta = (position - mean).eval();
 		mean += (delta/n);
 
-		// Percent sign is a element wise multiplication.
-		// I'd like NumPy-style array and matrix separation better.
-		// TODO: Hmm.. using * here doesn't trigger an error compile time,
-		// so there must be some performance penalties involved.
-		ss += delta % (position-mean);
-		segment_lik = n*model->seg_normer -
-			0.5*
-			ar::sum(
-				ss%model->noise_prec
-				);
-
+		ss += delta.cwiseProduct(position-mean);
+		segment_lik = n*model->seg_normer - 0.5*(ss.cwiseProduct(model->noise_prec)).sum();
 	}
 
 	double likelihood() const {
@@ -129,12 +128,13 @@ struct IocsHypothesis {
 // TODO: Make a general segmented regression thingie when needed
 template <uint ndim>
 struct Iocs {
-	using Vector = ar::vec::fixed<ndim>;
+	using Vector = Vector2d;
 	using Hypothesis = IocsHypothesis<Vector, Iocs>;
 	Vector noise_std;
 	Vector noise_prec;
 	double split_rate;
-	std::vector<Hypothesis> hypotheses;
+	// This could maybe be a list
+	std::vector<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
 
 	double seg_normer;
 
@@ -143,15 +143,21 @@ struct Iocs {
         Iocs(Vector noise_std, double split_rate)
 		:noise_std(noise_std), split_rate(split_rate)
 	{
-		seg_normer = log(1.0/(pow(sqrt(2*M_PI), ndim)*ar::prod(noise_std)));
-		noise_prec = 1.0/ar::square(noise_std);
+		seg_normer = log(1.0/(pow(sqrt(2*M_PI), ndim)*noise_std.prod()));
+		// There should be cwiseSquare, but there isn't.
+		noise_prec = 1.0/(noise_std.cwiseProduct(noise_std).array());
         }
-
+	
 	double split_likelihood(double dt) const {
 		return ndim*log(1.0-exp(-split_rate*dt));
 	}
+	
+	void measurement(double dt, double *position) {
+		Map<Vector> pos(position);
+		measurement(dt, pos);
+	}
 
-	void measurement(double dt, const Vector& measurement) {
+	void measurement(double dt, Ref<Vector> measurement) {
 		if(hypotheses.size() == 0) {
 			hypotheses.emplace_back(this);
 			auto& root = hypotheses.back();
@@ -160,9 +166,9 @@ struct Iocs {
 			return;
 		}
 		
-		auto& winner = hypotheses[0];
+		auto& winner = hypotheses.front();
 		Hypothesis new_hypo(this, winner, dt, i);
-		auto worst_survivor = new_hypo.history_lik + 1e-6;
+		auto worst_survivor = new_hypo.history_lik;
 		
 		auto cutoff = std::find_if(hypotheses.begin(), hypotheses.end(),
 			[&worst_survivor](const Hypothesis& hypo) {
@@ -180,6 +186,7 @@ struct Iocs {
 			hypo.measurement(i, dt, measurement);
 		}
 		
+		// This could maybe be a heap
 		std::sort(hypotheses.begin(), hypotheses.end(),
 			[](const Hypothesis& a, const Hypothesis& b) {
 				return a.likelihood() > b.likelihood();
@@ -191,94 +198,6 @@ struct Iocs {
 		++i;
 	}
 };
-
-/*
-template <class Vector>
-std::vector<uint> iocs(
-		std::vector<double>& ts,
-		std::vector< Vector >& gaze,
-	        Vector noise_std = 1.0,
-		double split_rate=1.0/0.250)
-{
-        using GazeVector = StaticVector<double, ndim>;
-	using Hypothesis = IocsHypothesis<GazeVector>;
-	std::vector< Hypothesis > hypotheses;
-
-	auto seg_normer = log(1.0/(pow(sqrt(2*blaze::M_PI), ndim)*noise_std.prod()));
-	auto split_lik = [&split_rate](double dt) {
-		return ndim*log(1.0-exp(-split_rate*dt));
-	};
-	auto likelihood_cmp =  [](Hypothesis& a, Hypothesis& b) {
-		return a.likelihood() > b.likelihood();
-	};
-
-	Hypothesis root_hypo;
-	root_hypo.n = 1;
-	root_hypo.mean = gaze;
-	//root_hypo.ss = {0.0}; Let's hope it's zero by default
-	root_hypo.history_lik = 0.0;
-	root_hypo.segment_lik = seg_normer;
-	
-	hypotheses.push_back(root_hypo);
-	
-	auto prev_t = ts[0];
-
-	for(uint i = 1; i < ts.size(); ++i) {
-		auto t = ts[i];
-		auto g = gaze[i];
-		auto dt = t - prev_t; prev_t = t;
-		
-		auto winner = hypotheses[0];
-
-		Hypothesis new_hypo;
-		std::copy(winner.splits.begin(), winner.splits.end(),
-			new_hypo.splits.begin());
-		new_hypo.n = 1;
-		new_hypo.mean = gaze;
-		//new_hypo.ss = {0.0}; Let's hope it's zero by default
-		new_hypo.history_lik = winner.likelihood() + split_lik(dt);
-		new_hypo.segment_lik = seg_normer;
-		
-
-		auto best_survivor = new_hypo.likelihood();
-		auto itr = hypotheses.begin();
-		for(; itr < hypotheses.end(); itr++) {
-			if(itr->likelihood() < best_survivor) break;
-		}
-		if(itr != hypotheses.end()) {
-			hypotheses.resize(itr-hypotheses.begin());
-		}
-
-		for(auto hypothesis: hypotheses) {
-			hypothesis.n += 1;
-			auto delta = g - hypothesis.mean;
-			hypothesis.mean += delta/hypothesis.n;
-			hypothesis.ss += delta*(g-hypothesis.mean);
-			
-			hypothesis.segment_lik = hypothesis.n*seg_normer -
-				(hypothesis.ss*(1.0/noise_std)).sum()*0.5;
-		}
-
-		hypotheses.push_back(new_hypo);
-		std::sort(hypotheses.begin(), hypotheses.end(), likelihood_cmp);
-
-	}
-
-	return hypotheses[0].splits;
-
-}*/
-
-/*
-void iocs2d(double *ts, double *gaze, uint length,
-			double noise_std, double split_rate) {
-		
-		StaticVector<double, 2> noise_std_vec;
-                noise_std_vec *= 0.0;
-		iocs<2>(
-			Map<Array<double, Dynamic, 1> >(ts, length, 1),
-			Map<Array<double, Dynamic, 2> >(gaze, length, 2),
-			noise_std_vec, split_rate);
-}*/
 
 typedef Iocs<2u> Iocs2d;
 
@@ -296,7 +215,7 @@ void iocs2d(double *ts, double *gaze, uint length,
 		prev_t = ts[i];
 	}
 	
-	auto split = fitter.hypotheses[0].splits.tail;
+	auto split = fitter.hypotheses.front().splits.tail;
 	while(split) {
 		saccades[split->value] = 1;
 		split = split->parent;
