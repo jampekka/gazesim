@@ -58,8 +58,8 @@ struct SharedList {
 
 	~SharedList() {
 		if(!tail) return;
-		#warning "Make sure this doesn't leak!"
-		//tail->refcount -= 1;
+		#warning "Make sure this doesn't leak nor crash!"
+		tail->refcount -= 1;
 		
 		// We could in theory do this cascade in the
 		// destructor of the SharedNode. However, in practice
@@ -136,10 +136,10 @@ struct Iocs {
 	Vector noise_std;
 	Vector noise_prec;
 	double split_rate;
-	//std::vector<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
+	// std::vector<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
 	// At least the boost pool allocators are quite slow, although
 	// almost half of the performance seems to go to malloc
-	std::forward_list<Hypothesis> hypotheses;
+	std::forward_list<Hypothesis, Eigen::aligned_allocator<Vector>> hypotheses;
 
 	double seg_normer;
 
