@@ -7,7 +7,12 @@ iocs_perf: iocs_perf.cpp segmented_regression.hpp
 
 .PHONY: perftest
 perftest: iocs_perf
-	./iocs_perf 100000 0.1 4
+	./iocs_perf 1000000 10 1
+
+
+.PHONY: benchmark
+benchmark: benchmark.py fast_saccade_detectors.so gazesim.py saccade_detectors.py
+	./benchmark.py
 
 iocs_perf.callgrind: iocs_perf
 	valgrind --tool=callgrind --callgrind-out-file=$@ ./$< 100000 0.1 4

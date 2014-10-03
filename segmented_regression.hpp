@@ -97,6 +97,10 @@ struct IocsHypothesis {
 		:model(model)
 	{}
 
+	void measurement(uint i, double dt, double* position) {
+		measurement(i, dt, Vector(position));
+	}
+
 	void measurement(uint i, double dt, Vector position) {
 		n++;
 		// We need an explicit eval here, otherwise armadillo
@@ -288,7 +292,7 @@ void iocs2d(double *ts, double *gaze, uint length,
 
 	auto prev_t = ts[0];
 	for(uint i=0; i < length; ++i) {
-		fitter.measurement(ts[i] - prev_t, Iocs2d::Vector(&gaze[i*ndim]));
+		fitter.measurement(ts[i] - prev_t, &gaze[i*ndim]);
 		prev_t = ts[i];
 	}
 	
