@@ -1,10 +1,12 @@
+from __future__ import division
+
 import itertools
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-class ObjectPositionSimulator(object):
+class JumpingObjectPositionSimulator(object):
 	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250):
 		self.width = width
 		self.height = height
@@ -27,6 +29,105 @@ class ObjectPositionSimulator(object):
 
 		return self.pos, True
 
+def constant_accel_saccade(a):
+	class saccade(object):
+		def __init__(self, init_dt, x0, x1):
+			diff = np.subtract(x1, x0)
+			length = np.linalg.norm(diff)
+			direction = diff/length
+			T = np.sqrt(length/a)*2
+			
+			self.x0 = x0
+			self.x1 = x1
+			self.direction = direction
+			self.T = T
+			
+			self.duration = T
+			self.mean_speed = length/T
+			self.max_speed = a*(T/2.0)
+			self.max_accel = a
+		
+	
+		def __iter__(self):
+			x0 = self.x0
+			T = self.T
+			direction = self.direction
+
+			t = yield x0
+			while t < T/2.0:
+				dist = 0.5*a*t**2
+				t += yield x0 + dist*direction
+	
+			while t < T:
+				dist = 1/4*a*(-2*t**2 + 4*t*T - T**2)
+				t += yield x0 + dist*direction
+	
+	
+			yield self.x1
+	
+	return saccade
+		
+
+
+# Maybe the saccade shouldn't be a g
+def empty_gen():
+	def dummy_gen():
+		return; yield
+	g = dummy_gen()
+	try:
+		g.next()
+	except StopIteration:
+		pass
+	return g
+
+
+"""
+def constant_acceleration_from_main_sequence(distance, vmax):
+	THIS IS WRONG DONT RUN ME EVER AGAIN!
+	return 2*vmax**2/distance
+
+# This is estimated from the plot in Bahill et al 1975 paper
+# "The Main Sequence, A Tool for Studying Human Eye Movements".
+# TODO: Find a better source or estimate from data. Or at least
+#	average some values
+DEFAULT_CONSTANT_ACCEL = constant_acceleration_from_main_sequence(0.1, 10)
+print constant_acceleration_from_main_sequence(10, 300)
+
+print DEFAULT_CONSTANT_ACCEL
+"""
+
+class BallisticObjectSimulator(object):
+	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250, saccade_gen=constant_accel_saccade(5000.0)):
+		self.width = width
+		self.height = height
+		self.pos = np.array([0.0, 0.0])
+		self.saccade_gen = saccade_gen
+		self.current_saccade = empty_gen()
+		self.rate = rate
+
+	def __call__(self, dt):
+		try:
+			self.pos = self.current_saccade.send(dt)
+			return self.pos, False
+		except StopIteration:
+			pass
+
+		if not np.random.rand() >= np.exp(-self.rate*dt):
+			return self.pos, False
+		
+		x = (np.random.rand()-0.5)*self.width
+		y = (np.random.rand()-0.5)*self.height
+		self.current_saccade = iter(self.saccade_gen(dt, self.pos, np.array([x, y])))
+		
+		try:
+			self.pos = self.current_saccade.next()
+		except StopIteration:
+			pass
+
+		return self.pos, True
+
+
+
 def gaussian_noiser(sx=1.0, sy=1.0):
 	def noiser(dt, xy):
 		x = xy[0]+np.random.randn()*sx
@@ -39,7 +140,7 @@ def infrange(i=0):
 		yield i
 		i += 1
 
-def generate_sequence(simulator, noiser, sampling_rate=100.0):
+def generate_sequence(simulator, noiser, sampling_rate=500.0):
 	dt = 1.0/sampling_rate
 	t = 0.0
 	while True:
@@ -48,18 +149,49 @@ def generate_sequence(simulator, noiser, sampling_rate=100.0):
 		yield t, pos, gaze, had_saccade
 		
 		t += dt
-		
 
-if __name__ == '__main__':
+def test():
 	sampling_rate = 100.0
 	duration = 60.0
-	simulator = ObjectPositionSimulator()
+	simulator = BallisticObjectSimulator(rate=1.0/1.0)
 	noiser = gaussian_noiser()
 	generator = generate_sequence(simulator, noiser)
+	#print list(itertools.islice(generator, int(duration*sampling_rate)))
 	t, pos, gaze, saccades = zip(*itertools.islice(generator, int(duration*sampling_rate)))
 	plt.plot(t, zip(*pos)[0])
 	plt.plot(t, zip(*gaze)[0], '.')
 	plt.show()
+
+	
+def plot_main_sequence():
+	origin = np.zeros(2)
+	direction = np.ones(2)/np.sqrt(2)
+	saccade_gen=constant_accel_saccade(9000.0)
+
+	d = []
+	for dist in np.arange(0.01, 100.0):
+		saccade = saccade_gen(0, origin, dist*direction)
+		d.append([dist, saccade.max_speed])
+	
+	plt.loglog(*zip(*d))
+	plt.show()
+
+def dummy_main_series():
+	#main_series = lambda distance: distance*5
+	main_series = lambda distance: 10*distance
+	distances = np.linspace(0.01, 100, 1000)
+	
+	plt.subplot(2,1,1)
+	plt.plot(distances, main_series(distances))
+	plt.subplot(2,1,2)
+	plt.loglog(distances, main_series(distances))
+	plt.show()
+	
+
+if __name__ == '__main__':
+	#test()
+	#plot_main_sequence()
+	dummy_main_series()
 
 """
 	import time
