@@ -1,3 +1,5 @@
+from __future__ import division
+
 import numpy as np
 import scipy.optimize, scipy.stats
 import operator
@@ -10,6 +12,24 @@ def mean_distance(a, b):
 
 def erode_consecutive(idx):
 	return idx[:-1][np.diff(idx) > 1]
+
+def reconstruct_pursuits(t, gaze, saccades):
+	# TODO: Make this fast
+	idx = np.unique([0] + list(saccades) + [len(gaze)])
+	print saccades, idx
+	
+	import matplotlib.pyplot as plt
+	result = np.empty(gaze.shape)
+	n = idx.shape[0]
+	for i in range(n-1):
+		slc = slice(idx[i], idx[i+1])
+		my_t = t[slc]
+		#print len(my_t)
+		fit = np.polyfit(my_t, gaze[slc], 1)
+		result[slc] = fit[0]*my_t + fit[1]
+	
+	return result
+
 
 def ivt(t, gaze, threshold=1000.0):
 	dt = np.diff(t)
@@ -111,7 +131,8 @@ def iocs(ts, gaze, split_rate=1.0/0.250, noise_std=1.0):
 			# or there's some kind of horrible bug somewhere.
 			# Or the logic behind the parameters doesn't work.
 			hypothesis.segment_lik = (hypothesis.n*seg_normer - (hypothesis.ssx+hypothesis.ssy)/(2*noise_std**2))
-
+			#print len(hypotheses)
+		
 		hypotheses.append(new)
 		hypotheses.sort(key=lik_comparator)
 		#print "%s,%s"%(i, hypotheses[0].total_lik)
@@ -141,6 +162,169 @@ def iocs(ts, gaze, split_rate=1.0/0.250, noise_std=1.0):
 		
 
 #def idt
+# TODO! Iols is about 4x as split-happy as IOCS. Probably due to not
+# 	discounting the extra degree of any way
+def iols(ts, gaze, split_rate=1.0/0.250/4, noise_std=np.array([1.0, 1.0])):
+	ndim = len(gaze[0])
+	# TODO: Handle the axes separately
+	seg_normer = np.log(1.0/(noise_std.prod()*np.sqrt(np.pi*2)**ndim))
+	
+	def segment_logpdf(h):
+		# TODO! Just sanity checking!
+		#return (h.n*seg_normer - (h.pos_ss)/(2*noise_std**2)).sum()
+		
+		# Calculate the residual.
+		# One way to rationalize this is to think
+		# that Pearson correlation:
+		# r = co_ss/(sqrt(pos_ss)*sqrt(t_ss))
+		# And coefficient of determination is
+		# r**2 = 1 - residual_ss/pos_ss = co_ss**2/(pos_ss*t_ss)
+		# from which the residual_ss is:
+		residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
+		return hypo.n*seg_normer - (0.5*residual_ss/noise_std**2).sum()
+
+	root = SplitHypothesis()
+	root.splits = []
+	root.history_lik = 0.0
+	root.segment_lik = seg_normer
+	root.n = 1
+	root.pos_m = gaze[0].copy()
+	root.t_m = ts[0].copy()
+
+	root.pos_ss = 0.0
+	root.t_ss = 0.0
+	root.co_ss = 0.0
+	
+	split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
+
+	hypotheses = [root]
+	prev_t = ts[0]
+	for i, (t, pos) in enumerate(zip(ts, gaze)[1:], 1):
+		dt = t - prev_t
+		prev_t = t
+		
+		winner = max(hypotheses, key=lambda h: h.total_lik)
+		new = SplitHypothesis()
+		new.history_lik = winner.total_lik + split_lik(dt)
+		new.segment_lik = seg_normer
+		new.n = 1
+		new.splits = winner.splits + [i]
+		new.pos_m = pos.copy()
+		new.t_m = ts[0].copy()
+		new.pos_ss = 0.0
+		new.t_ss = 0.0
+		new.co_ss = 0.0
+		
+		new_total_lik = new.total_lik
+		hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+
+		for hypo in hypotheses:
+			hypo.n += 1
+
+			d_pos = pos - hypo.pos_m
+			# Calculate hypothesis position mean incrementally
+			hypo.pos_m += d_pos/hypo.n
+			# And incremental sum of squares
+			hypo.pos_ss += d_pos*(pos - hypo.pos_m)
+			
+			# Above with s/pos/t/g
+			d_t = t - hypo.t_m
+			hypo.t_m += d_t/hypo.n
+			hypo.t_ss += d_t*(t - hypo.t_m)
+
+			# Calculate the regression SS incrementally
+			# (for both independent axes simultaneously)
+			hypo.co_ss += ((hypo.n-1)/hypo.n)*d_pos*d_t
+			
+			
+			hypo.segment_lik = segment_logpdf(hypo)
+		
+		
+		hypotheses.append(new)
+		#print len(hypotheses)
+	winner = max(hypotheses, key=lambda h: h.total_lik)
+	return winner.splits
+
+def iols_noprune(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
+	ndim = len(gaze[0])
+	# TODO: Handle the axes separately
+	seg_normer = np.log(1.0/(noise_std.prod()*np.sqrt(np.pi*2)**ndim))
+	
+	def segment_logpdf(h):
+		
+		# Calculate the residual.
+		# One way to rationalize this is to think
+		# that Pearson correlation:
+		# r = co_ss/(sqrt(pos_ss)*sqrt(t_ss))
+		# And coefficient of determination is
+		# r**2 = 1 - residual_ss/pos_ss = co_ss**2/(pos_ss*t_ss)
+		# from which the residual_ss is:
+		residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
+		return hypo.n*seg_normer - (0.5*residual_ss/noise_std**2).sum()
+
+	root = SplitHypothesis()
+	root.splits = []
+	root.history_lik = 0.0
+	root.segment_lik = seg_normer
+	root.n = 1
+	root.pos_m = gaze[0].copy()
+	root.t_m = ts[0].copy()
+
+	root.pos_ss = 0.0
+	root.t_ss = 0.0
+	root.co_ss = 0.0
+	
+	split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
+
+	hypotheses = [root]
+	prev_t = ts[0]
+	for i, (t, pos) in enumerate(zip(ts, gaze)[1:], 1):
+		dt = t - prev_t
+		prev_t = t
+		
+		winner = max(hypotheses, key=lambda h: h.total_lik)
+		# TODO! Something wrong here!
+		new = SplitHypothesis()
+		new.history_lik = winner.total_lik + split_lik(dt)
+		new.segment_lik = seg_normer
+		new.n = 1
+		new.splits = winner.splits + [i]
+		new.pos_m = pos.copy()
+		new.t_m = ts[0].copy()
+		new.pos_ss = 0.0
+		new.t_ss = 0.0
+		new.co_ss = 0.0
+		
+		new_total_lik = new.total_lik
+		#hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+
+		for hypo in hypotheses:
+			hypo.n += 1
+
+			d_pos = pos - hypo.pos_m
+			# Calculate hypothesis position mean incrementally
+			hypo.pos_m += d_pos/hypo.n
+			# And incremental sum of squares
+			hypo.pos_ss += d_pos*(pos - hypo.pos_m)
+			
+			# Above with s/pos/t/g
+			d_t = t - hypo.t_m
+			hypo.t_m += d_t/hypo.n
+			hypo.t_ss += d_t*(t - hypo.t_m)
+
+			# Calculate the regression SS incrementally
+			# (for both independent axes simultaneously)
+			hypo.co_ss += ((hypo.n-1)/hypo.n)*d_pos*d_t
+			
+			
+			hypo.segment_lik = segment_logpdf(hypo)
+		
+		
+		hypotheses.append(new)
+		#print len(hypotheses)
+	winner = max(hypotheses, key=lambda h: h.total_lik)
+	return winner.splits
+
 
 def reconstruct_fixations(gaze, saccades):
 	gaze = np.array(gaze)

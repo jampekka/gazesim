@@ -30,6 +30,45 @@ cdef void _reconstruct_fixations(np.ndarray[np.float64_t, ndim=2] gaze, np.ndarr
 			gaze[j,0] = mx
 			gaze[j,1] = my
 
+def reconstruct_pursuits(t, gaze, saccades):
+	# TODO: Make this fast
+	idx = np.unique([0] + list(saccades) + [len(gaze)])
+	result = np.empty(gaze.shape)
+	n = idx.shape[0]
+	for i in range(n-1):
+		slc = slice(idx[i], idx[i+1])
+		my_t = t[slc]
+		fit = np.polyfit(my_t, gaze[slc].T, 1)
+		result[slc] = np.polyval(fit, my_t).T
+	
+	return result
+
+
+	gaze = np.array(gaze, dtype=np.float64, copy=True)
+	_reconstruct_pursuits(gaze, np.array(saccades, dtype=int))
+	return gaze
+
+@cython.boundscheck(False)
+@cython.cdivision(True)
+cdef void _reconstruct_pursuits(np.ndarray[np.float64_t, ndim=2] gaze, np.ndarray[np.int_t, ndim=1] saccades):
+	cdef np.ndarray[np.int_t] idx = np.unique([0] + list(saccades) + [len(gaze)])
+	cdef int n = idx.shape[0]
+	cdef int i, s, e, j
+	cdef double mx, my
+	for i in range(n-1):
+		mx = 0
+		my = 0
+		s = idx[i]
+		e = idx[i+1]
+		for j in range(s, e):
+			mx += gaze[j,0]
+			my += gaze[j,1]
+		mx /= (e-s)
+		my /= (e-s)
+		for j in range(s, e):
+			gaze[j,0] = mx
+			gaze[j,1] = my
+
 @cython.boundscheck(False)
 @cython.cdivision(True)
 def idt(np.ndarray[np.float64_t] t, np.ndarray[np.float64_t, ndim=2]gaze, double threshold=10.0):

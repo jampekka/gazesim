@@ -92,14 +92,77 @@ def eval_ode(func, ts, init, *args):
 	"""
 	return scipy.integrate.odeint(nth_order_ode(func, args), init, t)
 
-t = np.arange(0, 0.1, 0.0001)
 
-x, v, a = eval_ode(accel, t, [0.0, 0.0], lambda t: 10.0).T
-#print x
+def test():
+	t = np.arange(0, 0.1, 0.0001)
+	
+	x, v, a = eval_ode(accel, t, [0.0, 0.0], lambda t: 10.0).T
+	#print x
+	plt.subplot(3,1,1)
+	plt.plot(t*1000, x)
+	plt.subplot(3,1,2)
+	plt.plot(t*1000, v)
+	plt.subplot(3,1,3)
+	plt.plot(t*1000, a)
+	plt.show()
+
+def deriv_profile(deg, locfunc, t=np.arange(0, 0.5, 0.001), mags=np.arange(1, 30, 5)):
+	for mag in mags:
+		pfunc = lambda t: np.ones(np.size(t))*mag*(t > 0.01)
+		x = locfunc(t, pfunc)
+		dt = np.gradient(t)
+		for i in range(deg):
+			x = np.gradient(x)/dt
+		
+		plt.plot(t, x)
+
+def quadratic_damper(A=100000.0, D=1000.0):
+	def accel(t, (x, v), pos):
+		d = pos(t)-x
+		return -A*d**2
+
+	return accel
+
+def impulse_response(locfunc, t=np.arange(0, 0.5, 0.001)):
+	def impulsehack(t):
+		x = np.zeros(np.size(t))
+		x[10] = 1.0
+		return x
+
+	plt.plot(t, locfunc(t, impulsehack))
+
+import scipy.signal
+from scipy.signal import lfilter, butter, cheby1
+
+def stupid_lti(freq=10.0):
+	def filt(t, pos):
+		nyq = 1/(2*np.diff(t).mean())
+		print nyq
+		#b, a = cheby1(1, 1.0, freq/nyq)
+		b, a = scipy.signal.bessel(2, freq/nyq)
+		print b, a
+		return lfilter(b, a, pos(t))	
+
+	return filt
+
+
+
+t = np.arange(0.0, 10000.0, 0.01)
+
+#plt.plot(t, (1-np.exp(-t)))
+#plt.plot(t, np.exp(-t))
+#plt.show()
+
+#gauss = lambda x: np.exp(-x**2)
+#plt.axvline(0)
+plt.show()
+
+#speed_profile(lambda t, posf: eval_ode(accel, t, [0.0, 0.0], posf))
+#speed_profile(lambda t, posf: eval_ode(quadratic_damper(), t, [0.0, 0.0], posf).T[0])
 plt.subplot(3,1,1)
-plt.plot(t*1000, x)
+deriv_profile(0, stupid_lti())
 plt.subplot(3,1,2)
-plt.plot(t*1000, v)
+deriv_profile(2, stupid_lti())
 plt.subplot(3,1,3)
-plt.plot(t*1000, a)
+impulse_response(stupid_lti())
 plt.show()

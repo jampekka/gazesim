@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-class JumpingObjectPositionSimulator(object):
+class ObjectPositionSimulator(object):
 	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250):
 		self.width = width
 		self.height = height
@@ -67,65 +67,6 @@ def constant_accel_saccade(a):
 	
 	return saccade
 		
-
-
-# Maybe the saccade shouldn't be a g
-def empty_gen():
-	def dummy_gen():
-		return; yield
-	g = dummy_gen()
-	try:
-		g.next()
-	except StopIteration:
-		pass
-	return g
-
-
-"""
-def constant_acceleration_from_main_sequence(distance, vmax):
-	THIS IS WRONG DONT RUN ME EVER AGAIN!
-	return 2*vmax**2/distance
-
-# This is estimated from the plot in Bahill et al 1975 paper
-# "The Main Sequence, A Tool for Studying Human Eye Movements".
-# TODO: Find a better source or estimate from data. Or at least
-#	average some values
-DEFAULT_CONSTANT_ACCEL = constant_acceleration_from_main_sequence(0.1, 10)
-print constant_acceleration_from_main_sequence(10, 300)
-
-print DEFAULT_CONSTANT_ACCEL
-"""
-
-class BallisticObjectSimulator(object):
-	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250, saccade_gen=constant_accel_saccade(5000.0)):
-		self.width = width
-		self.height = height
-		self.pos = np.array([0.0, 0.0])
-		self.saccade_gen = saccade_gen
-		self.current_saccade = empty_gen()
-		self.rate = rate
-
-	def __call__(self, dt):
-		try:
-			self.pos = self.current_saccade.send(dt)
-			return self.pos, False
-		except StopIteration:
-			pass
-
-		if not np.random.rand() >= np.exp(-self.rate*dt):
-			return self.pos, False
-		
-		x = (np.random.rand()-0.5)*self.width
-		y = (np.random.rand()-0.5)*self.height
-		self.current_saccade = iter(self.saccade_gen(dt, self.pos, np.array([x, y])))
-		
-		try:
-			self.pos = self.current_saccade.next()
-		except StopIteration:
-			pass
-
-		return self.pos, True
-
 
 
 def gaussian_noiser(sx=1.0, sy=1.0):
