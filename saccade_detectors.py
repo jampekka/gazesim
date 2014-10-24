@@ -162,65 +162,49 @@ def iocs(ts, gaze, split_rate=1.0/0.250, noise_std=1.0):
 		
 
 #def idt
-# TODO! Iols is about 4x as split-happy as IOCS. Probably due to not
-# 	discounting the extra degree of any way. Or due to some other
-#	buggery. (Actually probably just avoiding buggy behavior on too
-#	small pursuits with high enough split rate)
-# TODO: It seems that the n is wrong somewhere, ie same error doesn't always
-#	give same difference in likelihood!
+# TODO! Iols is a lot more split-happy as IOCS. Probably due to not
+# 	discounting the extra degree of freedom any way. Ie. with "real"
+#	parametrization we get nowhere close to optimum fit.
+#	The "splittiness" should probably be parametrized as eg. total variation anyway. And
+#	we should take into account the likelihood of "random slope" arising
+#	from the noise (perhaps something like a likelihood ratio?)
 def iols(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
 	ndim = len(gaze[0])
 	# TODO: Handle the axes separately
 	seg_normer = np.log(1.0/(noise_std.prod()*np.sqrt(np.pi*2)**ndim))
 	
 	def segment_logpdf(h):
-		# TODO! Just sanity checking!
-		#return (h.n*seg_normer - (h.pos_ss)/(2*noise_std**2)).sum()
-		
-		# Calculate the residual.
-		# One way to rationalize this is to think
-		# that Pearson correlation:
-		# r = co_ss/(sqrt(pos_ss)*sqrt(t_ss))
-		# And coefficient of determination is
-		# r**2 = 1 - residual_ss/pos_ss = co_ss**2/(pos_ss*t_ss)
-		# from which the residual_ss is:
-		residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
-		return hypo.n*seg_normer - (0.5*residual_ss/noise_std**2).sum()
+		if h.t_ss > 0:
+			residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
+		else:
+			residual_ss = h.pos_ss
+		likelihoods = ((hypo.n)*np.log(1.0/(noise_std*np.sqrt(2*np.pi))) -
+				residual_ss/(2*noise_std**2))
 
-	root = SplitHypothesis()
-	root.splits = []
-	root.history_lik = 0.0
-	root.segment_lik = seg_normer
-	root.n = 1
-	root.pos_m = gaze[0].copy()
-	root.t_m = ts[0].copy()
+		return likelihoods.sum()
 
-	root.pos_ss = 0.0
-	root.t_ss = 0.0
-	root.co_ss = 0.0
-	
 	split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
 
-	prev_lik = 0.0
-	hypotheses = [root]
-	winner = root
-	prev_t = ts[0]
-	for i, (t, pos) in enumerate(zip(ts, gaze)[1:], 1):
+	hypotheses = []
+	best_splits = []
+	best_lik = 0.0
+
+	prev_t = -np.inf
+	for i, (t, pos) in enumerate(zip(ts, gaze)):
 		dt = t - prev_t
 		prev_t = t
 		
 		#winner = max(hypotheses, key=lambda h: h.total_lik)
 		liks = [h.total_lik for h in hypotheses]
 		#if len(liks) != len(set(liks)): print "Losing it at", i
-		assert(winner.total_lik < prev_lik)
-		prev_lik = winner.total_lik
+		#assert(winner.total_lik < prev_lik)
+		#prev_lik = winner.total_lik
 		#print prev_lik
-
 		new = SplitHypothesis()
-		new.history_lik = winner.total_lik + split_lik(dt)
-		new.segment_lik = seg_normer
-		new.n = 1
-		new.splits = winner.splits + [i]
+		new.history_lik = best_lik + split_lik(dt)
+		new.segment_lik = 0.0
+		new.n = 0
+		new.splits = best_splits + [i]
 		new.pos_m = pos.copy()
 		new.t_m = ts[0].copy()
 		new.pos_ss = 0.0
@@ -228,7 +212,8 @@ def iols(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
 		new.co_ss = 0.0
 		
 		new_total_lik = new.total_lik
-		#hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+		hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+		hypotheses.append(new)
 
 		for hypo in hypotheses:
 			hypo.n += 1
@@ -248,16 +233,15 @@ def iols(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
 			# (for both independent axes simultaneously)
 			hypo.co_ss += ((hypo.n-1)/hypo.n)*d_pos*d_t
 			
-			
 			hypo.segment_lik = segment_logpdf(hypo)
 		
-		
-		hypotheses.append(new)
-		liks = [h.total_lik for h in hypotheses]
+
 		winner = max(hypotheses, key=lambda h: h.total_lik)
-		print i, winner.splits, winner.n
-		print "\t"*np.argmax(liks)+"v"
-		print "\t".join("%.1f"%f for f in liks)
+		assert not hasattr(winner, 'cant_win'), winner.n
+		best_splits = winner.splits
+		best_lik = winner.total_lik
+		#print "\t"*np.argmax(liks)+"v"
+		#print "\t".join("%.1f"%f for f in liks)
 		#print len(hypotheses)
 	#winner = max(hypotheses, key=lambda h: h.total_lik)
 	#print i, winner.splits, winner.n
