@@ -168,22 +168,41 @@ def iocs(ts, gaze, split_rate=1.0/0.250, noise_std=1.0):
 #	The "splittiness" should probably be parametrized as eg. total variation anyway. And
 #	we should take into account the likelihood of "random slope" arising
 #	from the noise (perhaps something like a likelihood ratio?)
-def iols(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
+def iols(ts, gaze, split_rate=None, noise_std=np.array([1.0, 1.0])):
 	ndim = len(gaze[0])
+	nparam = 2
+
+	if split_rate is None:
+		# Log of Jeffrey's prior for linear regression with known
+		# standard error. http://www.jstor.org/stable/2290514
+		# (maybe, getting any information about practical Bayesian stuff
+		# is horrible)
+		#split_lik = lambda dt: ndim*np.log(1.0/noise_std**((nparam+2)/2))
+		#split_lik = lambda dt: np.log(1.0/noise_std**((nparam+2)/2)).sum()
+		# Akaike information criterion
+		#split_lik = lambda dt: -nparam*ndim
+		split_lik = lambda dt: -0.5*ndim*nparam*np.log(2*np.pi)
+	else:
+		split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
 	# TODO: Handle the axes separately
 	seg_normer = np.log(1.0/(noise_std.prod()*np.sqrt(np.pi*2)**ndim))
 	
 	def segment_logpdf(h):
-		if h.t_ss > 0:
+		if (h.n >= nparam):
 			residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
 		else:
 			residual_ss = h.pos_ss
+		
 		likelihoods = ((hypo.n)*np.log(1.0/(noise_std*np.sqrt(2*np.pi))) -
 				residual_ss/(2*noise_std**2))
+		
+		# Correction for akaike
+		#c = nparam*(nparam + 1)/(h.n - nparam - 1)
+		
+		# Add the missing BIC term
+		likelihoods -= 0.5*(nparam*np.log(h.n))
+		return np.sum(likelihoods)
 
-		return likelihoods.sum()
-
-	split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
 
 	hypotheses = []
 	best_splits = []
@@ -212,7 +231,7 @@ def iols(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
 		new.co_ss = 0.0
 		
 		new_total_lik = new.total_lik
-		hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+		#hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
 		hypotheses.append(new)
 
 		for hypo in hypotheses:
