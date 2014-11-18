@@ -12,7 +12,7 @@
 #include <Eigen/StdVector>
 
 typedef unsigned int uint;
-using Eigen::Vector2d;
+using Eigen::Matrix;
 using Eigen::Map;
 using Eigen::Ref;
 
@@ -77,11 +77,9 @@ struct SharedList {
 
 template <class Vector, class Model>
 struct IocsHypothesis {
-	// TODO: We can save a lot of memory and allocations by doing
-	//	a shared pointer linked list thingie.
 	int n = 0;
-	Vector mean = {0.0, 0.0};
-	Vector ss = {0.0, 0.0};
+	Vector mean;
+	Vector ss;
 	
 	// This should probably be const Model* const, but STL tears a new one
 	// if we declare it so, as it will kill the move constructor.
@@ -99,6 +97,8 @@ struct IocsHypothesis {
 	{
 		history_lik = parent.likelihood();
 		history_lik += model->split_likelihood(dt);
+		mean *= 0.0;
+		ss *= 0.0;
 	}
 	
 	IocsHypothesis(Model* model)
@@ -131,7 +131,7 @@ struct IocsHypothesis {
 // TODO: Make a general segmented regression thingie when needed
 template <uint ndim>
 struct Iocs {
-	using Vector = Vector2d;
+	using Vector = Matrix<double, ndim, 1>;
 	using Hypothesis = IocsHypothesis<Vector, Iocs>;
 	Vector noise_std;
 	Vector noise_prec;
@@ -199,6 +199,15 @@ struct Iocs {
 		++i;
 	}
 };
+
+/* Naive optimal linear segmentation.
+   Assumes that velocity between segments can be
+   "infinite" (ie start of the segment doesn't in any way depend from the
+   previous). Not very realistic, but statistically a simple case.
+*/ 
+/*struct Nols {
+	
+}*/
 
 typedef Iocs<2u> Iocs2d;
 
