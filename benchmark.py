@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
-from gazesim import ObjectPositionSimulator, gaussian_noiser, generate_sequence
+from gazesim import JumpingObjectPositionSimulator as ObjectPositionSimulator, gaussian_noiser, generate_sequence
 from saccade_detectors import ivt, idt, iocs as iocs_slow, mean_distance
 #import pyximport; pyximport.install()
 from fast_saccade_detectors import reconstruct_fixations, idt, optimize_1d, iocs
