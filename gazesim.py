@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-class ObjectPositionSimulator(object):
+class JumpingObjectPositionSimulator(object):
 	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250):
 		self.width = width
 		self.height = height

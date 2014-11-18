@@ -22,7 +22,7 @@ def reconstruct_pursuits(t, gaze, saccades):
 	result = np.empty(gaze.shape)
 	n = idx.shape[0]
 	for i in range(n-1):
-		slc = slice(idx[i], idx[i+1])
+		slc = slice(idx[i], idx[i+1]+1)
 		my_t = t[slc]
 		#print len(my_t)
 		fit = np.polyfit(my_t, gaze[slc], 1)
@@ -180,8 +180,11 @@ def iols(ts, gaze, split_rate=None, noise_std=np.array([1.0, 1.0])):
 		#split_lik = lambda dt: ndim*np.log(1.0/noise_std**((nparam+2)/2))
 		#split_lik = lambda dt: np.log(1.0/noise_std**((nparam+2)/2)).sum()
 		# Akaike information criterion
-		#split_lik = lambda dt: -nparam*ndim
-		split_lik = lambda dt: -0.5*ndim*nparam*np.log(2*np.pi)
+		#split_lik = lambda dt: 0.0
+		split_lik = lambda dt: -nparam*ndim
+		# Part bik criterion
+		# NOTE! Needs a different optimization criterion!
+		#split_lik = lambda dt: -0.5*ndim*nparam*np.log(2*np.pi)
 	else:
 		split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
 	# TODO: Handle the axes separately
@@ -193,45 +196,48 @@ def iols(ts, gaze, split_rate=None, noise_std=np.array([1.0, 1.0])):
 		else:
 			residual_ss = h.pos_ss
 		
-		likelihoods = ((hypo.n)*np.log(1.0/(noise_std*np.sqrt(2*np.pi))) -
+		likelihoods = ((h.n)*np.log(1.0/(noise_std*np.sqrt(2*np.pi))) -
 				residual_ss/(2*noise_std**2))
 		
 		# Correction for akaike
 		#c = nparam*(nparam + 1)/(h.n - nparam - 1)
 		
 		# Add the missing BIC term
-		likelihoods -= 0.5*(nparam*np.log(h.n))
+		#likelihoods -= 0.5*(nparam*np.log(h.n))
 		return np.sum(likelihoods)
 
 
 	hypotheses = []
 	best_splits = []
 	best_lik = 0.0
-
-	prev_t = -np.inf
-	for i, (t, pos) in enumerate(zip(ts, gaze)):
+	
+	# TODO! This calculates two different errors
+	#	for the join points! At least figure out
+	#	what this means for the total likelihood!
+	prev_t = ts[0]
+	prev_pos = gaze[0]
+	for i, (t, pos) in enumerate(zip(ts, gaze)[1:], 1):
 		dt = t - prev_t
-		prev_t = t
 		
-		#winner = max(hypotheses, key=lambda h: h.total_lik)
-		liks = [h.total_lik for h in hypotheses]
-		#if len(liks) != len(set(liks)): print "Losing it at", i
-		#assert(winner.total_lik < prev_lik)
-		#prev_lik = winner.total_lik
-		#print prev_lik
 		new = SplitHypothesis()
 		new.history_lik = best_lik + split_lik(dt)
-		new.segment_lik = 0.0
-		new.n = 0
-		new.splits = best_splits + [i]
-		new.pos_m = pos.copy()
-		new.t_m = ts[0].copy()
+		new.n = 1
+		new.splits = best_splits + [i-1]
+		new.pos_m = np.copy(prev_pos)
+		new.t_m = np.copy(prev_t)
 		new.pos_ss = 0.0
 		new.t_ss = 0.0
 		new.co_ss = 0.0
+		new.segment_lik = segment_logpdf(new)
+		
+		prev_t = t
+		prev_pos = pos
 		
 		new_total_lik = new.total_lik
-		#hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+		hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
+		#for h in hypotheses:
+		#	if h.total_lik < new_total_lik:
+		#		h.cant_win = True
 		hypotheses.append(new)
 
 		for hypo in hypotheses:
@@ -266,85 +272,6 @@ def iols(ts, gaze, split_rate=None, noise_std=np.array([1.0, 1.0])):
 	#print i, winner.splits, winner.n
 	return winner.splits
 
-def iols_noprune(ts, gaze, split_rate=1.0/0.250, noise_std=np.array([1.0, 1.0])):
-	ndim = len(gaze[0])
-	# TODO: Handle the axes separately
-	seg_normer = np.log(1.0/(noise_std.prod()*np.sqrt(np.pi*2)**ndim))
-	
-	def segment_logpdf(h):
-		
-		# Calculate the residual.
-		# One way to rationalize this is to think
-		# that Pearson correlation:
-		# r = co_ss/(sqrt(pos_ss)*sqrt(t_ss))
-		# And coefficient of determination is
-		# r**2 = 1 - residual_ss/pos_ss = co_ss**2/(pos_ss*t_ss)
-		# from which the residual_ss is:
-		residual_ss = h.pos_ss - h.co_ss**2/h.t_ss
-		return hypo.n*seg_normer - (0.5*residual_ss/noise_std**2).sum()
-
-	root = SplitHypothesis()
-	root.splits = []
-	root.history_lik = 0.0
-	root.segment_lik = seg_normer
-	root.n = 1
-	root.pos_m = gaze[0].copy()
-	root.t_m = ts[0].copy()
-
-	root.pos_ss = 0.0
-	root.t_ss = 0.0
-	root.co_ss = 0.0
-	
-	split_lik = lambda dt: ndim*np.log(1 - np.exp(-split_rate*dt))
-
-	hypotheses = [root]
-	prev_t = ts[0]
-	for i, (t, pos) in enumerate(zip(ts, gaze)[1:], 1):
-		dt = t - prev_t
-		prev_t = t
-		
-		winner = max(hypotheses, key=lambda h: h.total_lik)
-		# TODO! Something wrong here!
-		new = SplitHypothesis()
-		new.history_lik = winner.total_lik + split_lik(dt)
-		new.segment_lik = seg_normer
-		new.n = 1
-		new.splits = winner.splits + [i]
-		new.pos_m = pos.copy()
-		new.t_m = ts[0].copy()
-		new.pos_ss = 0.0
-		new.t_ss = 0.0
-		new.co_ss = 0.0
-		
-		new_total_lik = new.total_lik
-		#hypotheses = [h for h in hypotheses if h.total_lik >= new_total_lik]
-
-		for hypo in hypotheses:
-			hypo.n += 1
-
-			d_pos = pos - hypo.pos_m
-			# Calculate hypothesis position mean incrementally
-			hypo.pos_m += d_pos/hypo.n
-			# And incremental sum of squares
-			hypo.pos_ss += d_pos*(pos - hypo.pos_m)
-			
-			# Above with s/pos/t/g
-			d_t = t - hypo.t_m
-			hypo.t_m += d_t/hypo.n
-			hypo.t_ss += d_t*(t - hypo.t_m)
-
-			# Calculate the regression SS incrementally
-			# (for both independent axes simultaneously)
-			hypo.co_ss += ((hypo.n-1)/hypo.n)*d_pos*d_t
-			
-			
-			hypo.segment_lik = segment_logpdf(hypo)
-		
-		
-		hypotheses.append(new)
-		#print len(hypotheses)
-	winner = max(hypotheses, key=lambda h: h.total_lik)
-	return winner.splits
 
 
 def reconstruct_fixations(gaze, saccades):
