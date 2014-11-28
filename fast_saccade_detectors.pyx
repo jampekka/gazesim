@@ -200,8 +200,12 @@ def optimize_1d(func, rng, t, gaze, pos):
 
 ctypedef unsigned int uint
 cimport libcpp
+# TODO: Ugly copypaste
 cdef extern from "segmented_regression.hpp":
 	void iocs2d(double *ts, double *gaze, uint length,
+		double *noise_std, double split_rate,
+		int *saccades)
+	void nols2d(double *ts, double *gaze, uint length,
 		double *noise_std, double split_rate,
 		int *saccades)
 
@@ -219,6 +223,27 @@ def iocs(ts, gaze, noise_std=[1.0, 1.0], split_rate=1.0/0.250):
 	# this interfacing stuff is horrible
 	cdef np.ndarray[np.int_t] saccades = np.zeros(len(ts), dtype=np.int, order='C')
 	iocs2d(<double *>cts.data, <double* >cgaze.data,
+		len(ts),
+		<double *>cnoise_std.data, crate,
+		<int *>saccades.data)
+	
+	#return saccades
+	return np.flatnonzero(saccades)
+	
+def nols(ts, gaze, noise_std=[1.0, 1.0], split_rate=1.0/0.250):
+	a = lambda a: np.asarray(a, dtype=np.float64, order='C')
+
+	cdef np.ndarray[np.float64_t] cts = a(ts)
+	cdef np.ndarray[np.float64_t, ndim=2] cgaze = a(gaze)
+	if not hasattr(noise_std, '__iter__'):
+		noise_std = [noise_std]*2
+	cdef np.ndarray[np.float64_t] cnoise_std = a(noise_std)
+	cdef double crate = split_rate
+	
+	# This really shouldn't be returned like this, but
+	# this interfacing stuff is horrible
+	cdef np.ndarray[np.int_t] saccades = np.zeros(len(ts), dtype=np.int, order='C')
+	nols2d(<double *>cts.data, <double* >cgaze.data,
 		len(ts),
 		<double *>cnoise_std.data, crate,
 		<int *>saccades.data)
