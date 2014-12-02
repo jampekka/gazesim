@@ -292,16 +292,23 @@ struct NolsHypothesis {
 		auto delta_t = t - mean_t;
 		mean_t += delta_t/n;
 		ss_t += delta_t*(t - mean_t);
+
 		
 		// Calculate the regression SS incrementally
 		// (for both independent axes simultaneously)
-		ss_xt += ((n-1)/n)*delta_x*delta_t;
+		ss_xt += ((n-1)/double(n))*delta_x*delta_t;
 		
-		auto residual_ss = ss_x - ss_xt.pow(2)/ss_t;
-
+		auto residual_ss = (ss_x - ss_xt.pow(2)/ss_t).eval();
+		if(ss_t == 0) residual_ss = ss_x; // Sometimes zero by zero is zero
 		auto likelihoods = n*(1.0/(model->noise_std*std::sqrt(2*M_PI))).log() -
 				residual_ss/(2*model->noise_std.pow(2));
+		
+		/*std::cout << "Residual and x ss's" << std::endl;
+		std::cout << ss_xt << std::endl;
+		std::cout << ss_x << std::endl;*/
+
 		auto segment_lik = likelihoods.sum();
+		//std::cout << n << " " << ss_t << " " << " " << segment_lik << std::endl;
 		_total_likelihood = history_lik + segment_lik;
 		
 	}
@@ -395,8 +402,8 @@ void nols2d(double *ts, double *gaze, uint length,
 	static const auto ndim = 2u;
 	if(length == 0) return;
 
-	Iocs2d::Vector noise_std_vec(noise_std);
-	Iocs2d fitter(noise_std_vec, split_rate);
+	Nols2d::Vector noise_std_vec(noise_std);
+	Nols2d fitter(noise_std_vec, split_rate);
 
 	auto prev_t = ts[0];
 	for(uint i=0; i < length; ++i) {
