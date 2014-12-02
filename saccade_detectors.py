@@ -25,8 +25,8 @@ def reconstruct_pursuits(t, gaze, saccades):
 		slc = slice(idx[i], idx[i+1]+1)
 		my_t = t[slc]
 		#print len(my_t)
-		fit = np.polyfit(my_t, gaze[slc], 1)
-		result[slc] = fit[0]*my_t + fit[1]
+		fit = np.array(map(lambda g: np.polyfit(my_t, g, 1), gaze[slc].T))
+		result[slc] = (fit[:,0]*my_t.reshape(-1, 1) + fit[:,1])
 	
 	return result
 
