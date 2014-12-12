@@ -4,6 +4,7 @@ import itertools
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.stats
 
 
 class JumpingObjectPositionSimulator(object):
@@ -28,6 +29,61 @@ class JumpingObjectPositionSimulator(object):
 		self.pos = [x, y]
 
 		return self.pos, True
+
+class LinearPursuit(object):
+	def __init__(self, x0, x1, speed):
+		x0 = np.asarray(x0)
+		x1 = np.asarray(x1)
+		self.endtime = np.linalg.norm(x1-x0)/speed
+		self.t = 0.0
+		self.x0 = x0
+		self.x1 = x1
+		
+
+	def __call__(self, dt):
+		# NOTE: The caller is responsible for giving
+		#	dt of 0 for the "first sample"
+		self.t += dt
+		if self.t >= self.endtime:
+			return self.x1
+		
+		reltime = self.t/self.endtime
+		return self.x0*(1-reltime) + self.x1*reltime
+
+class RandomLinearPursuitSimulator(object):
+	def __init__(self, width=20.0, height=20.0, mean_duration=0.250,
+			pursuit_speed=scipy.stats.gamma(1.0, scale=10.0).rvs):
+		self.width = width
+		self.height = height
+		self.pos = [0.0, 0.0]
+		self.mean_duration = mean_duration
+		self.pursuit_speed = pursuit_speed
+		self.current_pursuit = LinearPursuit(self.pos, self.pos, pursuit_speed())
+	
+	@property
+	def extent(self):
+		return (-self.width*0.5, self.width*0.5), (-self.height*0.5, self.height*0.5)
+	
+	def __call__(self, dt):
+		# In a homogenous Poisson process the probability
+		# that there's exactly zero events during dt reduces
+		# to exp(-rate * dt). So we can check if we
+		# have an event as follows:
+		if np.random.rand() < np.exp(-1.0/self.mean_duration*dt):
+			# No event at this time
+			return self.current_pursuit(dt), False
+		
+		x = (np.random.rand()-0.5)*self.width
+		y = (np.random.rand()-0.5)*self.height
+		src = [x, y]
+		x = (np.random.rand()-0.5)*self.width
+		y = (np.random.rand()-0.5)*self.height
+		target = [x, y]
+		
+		self.current_pursuit = LinearPursuit(src, target, self.pursuit_speed())
+		return self.current_pursuit(0.0), True
+
+
 
 def constant_accel_saccade(a):
 	class saccade(object):
@@ -132,17 +188,19 @@ def dummy_main_series():
 if __name__ == '__main__':
 	#test()
 	#plot_main_sequence()
-	dummy_main_series()
+	#dummy_main_series()
 
-"""
 	import time
-	sim = ObjectPositionSimulator()
+	sim = RandomLinearPursuitSimulator()
 	noiser = gaussian_noiser()
+	noiser = lambda dt, pos: pos
 	
 	#x, y = zip(*xy)
 	#plt.plot(x)
-	plt.xlim(-0.5*sim.width, 0.5*sim.width)
-	plt.ylim(-0.5*sim.width, 0.5*sim.width)
+	#plt.xlim(-0.5*sim.width, 0.5*sim.width)
+	#plt.ylim(-0.5*sim.width, 0.5*sim.width)
+	plt.xlim(sim.extent[0])
+	plt.ylim(sim.extent[1])
 	plt.ion()
 	
 	npoints = 10
@@ -152,18 +210,22 @@ if __name__ == '__main__':
 	gazes = []
 	thruths = []
 	times = []
-	for i in range(1000):
+	rate = 60.0
+	
+	cross, = plt.plot(0, 0, 'o')
+	for i in range(10000):
 		#t = time.time()
-		t = i/60.0
+		t = i/rate
 		times.append(t)
 		dt = t - prev_t
 		prev_t = t
-		pos = sim(dt)
+		pos, is_split = sim(dt)
 		gaze = noiser(dt, pos)
 		gazes.append(gaze)
 		thruths.append(pos)
 		
-		#continue
+		cross.set_data(pos[0], pos[1]); plt.pause(1.0/rate)
+		continue
 		for gp in pointstack:
 			gp.set_alpha(gp.get_alpha()*0.8)
 		if prev_gaze is not None:
@@ -174,8 +236,7 @@ if __name__ == '__main__':
 			gp = pointstack.pop(0)
 			gp.remove()
 		
-
-		plt.pause(0.0001)
+		plt.pause(1.0/rate)
 	
 	plt.clf()
 	plt.ioff()
@@ -183,4 +244,3 @@ if __name__ == '__main__':
 	plt.plot(times, zip(*gazes)[0], color='red')
 
 	plt.show()
-"""
