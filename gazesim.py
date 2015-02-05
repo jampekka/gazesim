@@ -6,6 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats
 
+from besseleye import eyefilter
+
 
 class JumpingObjectPositionSimulator(object):
 	def __init__(self, width=20.0, height=20.0, rate=1.0/0.250):
@@ -46,7 +48,6 @@ class LinearPursuit(object):
 		self.t += dt
 		if self.t >= self.endtime:
 			return self.x1
-		
 		reltime = self.t/self.endtime
 		return self.x0*(1-reltime) + self.x1*reltime
 
@@ -156,7 +157,7 @@ def test():
 	#print list(itertools.islice(generator, int(duration*sampling_rate)))
 	t, pos, gaze, saccades = zip(*itertools.islice(generator, int(duration*sampling_rate)))
 	plt.plot(t, zip(*pos)[0])
-	plt.plot(t, zip(*gaze)[0], '.')
+	plt.plot(t, eyefilter(zip(*gaze)[0], sampling_rate), '.')
 	plt.show()
 
 	
@@ -206,11 +207,11 @@ if __name__ == '__main__':
 	npoints = 10
 	pointstack = []
 	prev_gaze = None
-	prev_t = time.time()
+	prev_t = 0.0
 	gazes = []
 	thruths = []
 	times = []
-	rate = 60.0
+	rate = 1000.0
 	
 	cross, = plt.plot(0, 0, 'o')
 	for i in range(10000):
@@ -223,7 +224,7 @@ if __name__ == '__main__':
 		gaze = noiser(dt, pos)
 		gazes.append(gaze)
 		thruths.append(pos)
-		
+		continue
 		cross.set_data(pos[0], pos[1]); plt.pause(1.0/rate)
 		continue
 		for gp in pointstack:
@@ -241,6 +242,7 @@ if __name__ == '__main__':
 	plt.clf()
 	plt.ioff()
 	plt.plot(times, zip(*thruths)[0], color='green')
-	plt.plot(times, zip(*gazes)[0], color='red')
+	plt.plot(times, eyefilter(zip(*gazes)[0], rate), 'r.', color='red')
+	#plt.plot(times, zip(*gazes)[0], 'r.', color='red')
 
 	plt.show()
