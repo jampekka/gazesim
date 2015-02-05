@@ -16,7 +16,7 @@ def erode_consecutive(idx):
 def reconstruct_pursuits(t, gaze, saccades):
 	# TODO: Make this fast
 	idx = np.unique([0] + list(saccades) + [len(gaze)])
-	print saccades, idx
+	#print saccades, idx
 	
 	import matplotlib.pyplot as plt
 	result = np.empty(gaze.shape)

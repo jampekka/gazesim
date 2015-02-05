@@ -19,7 +19,7 @@ def eyefilter(signal, sampling_rate, order=3, cutoff=33.0):
 	# TODO: The fit doesn't seem stable, may not be a global
 	# error minimum
 	b, a = scipy.signal.bessel(order, hz_to_nyquist(cutoff, sampling_rate))
-	return scipy.signal.lfilter(b, a, signal)
+	return scipy.signal.lfilter(b, a, signal.T).T
 
 # From Table 1 of "Variability and development of a normative
 # data base for saccadic eye movements", Bahill et al 1989.
